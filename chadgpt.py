@@ -1,3 +1,4 @@
+
 """
 ChadGPT — 250M parameter GPT with GQA + RoPE
 Kaggle Script mode — 2 T4 GPU training via HuggingFace Accelerate
@@ -25,12 +26,12 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 # ──────────────────────────────────────────────
 GPT_CONFIG_250M = {
     "vocab_size": 50257,       # Vocabulary size
-    "context_length": 4096,    # Context length
+    "context_length": 1024,    # Context length (Phase 1 pretraining; extended to 4096 in Phase 2)
     "emb_dim": 1024,           # Embedding dimension
     "n_heads": 16,             # Number of attention heads
     "n_kv_heads": 4,           # Number of KV heads (grouped query attention)
     "n_layers": 18,            # Number of layers
-    "drop_rate": 0.1,          # Dropout rate
+    "drop_rate": 0.0,          # Dropout rate
     "qkv_bias": False,         # Query-Key-Value bias
 }
 
@@ -53,12 +54,13 @@ TRAIN_CONFIG = {
 
     # LR schedule — cosine decay with linear warmup
     "warmup_steps":    500,
-    "max_steps":       10000,
+    "max_steps":       15259,
     "min_lr_ratio":    0.1,
 
     # Batch
-    "batch_size":      2,              # per-GPU micro batch
-    "grad_accum_steps": 64,             # effective batch = batch_size × grad_accum × num_gpus
+    "batch_size":      2,               # per-GPU micro batch
+    "grad_accum_steps": 64,              # effective batch = batch_size x grad_accum x num_gpus x ctx
+                                        # = 2 x 8 x 2 x 1024 = 32,768 tokens/step (~16hr total)
 
     # Eval & logging
     "eval_interval":   100,
@@ -67,7 +69,7 @@ TRAIN_CONFIG = {
 
     # Checkpointing
     "ckpt_dir":        "/kaggle/working/checkpoints",
-    "save_interval":   250,
+    "save_interval":   100,
 }
 
 
@@ -76,12 +78,12 @@ TRAIN_CONFIG = {
 # ──────────────────────────────────────────────
 def text_to_token_ids(text, tokenizer):
     encoded = tokenizer.encode(text, allowed_special={'<|endoftext|>'})
-    encoded_tensor = torch.tensor(encoded).unsqueeze(0)  # add batch dimension
+    encoded_tensor = torch.tensor(encoded).unsqueeze(0)
     return encoded_tensor
 
 
 def token_ids_to_text(token_ids, tokenizer):
-    flat = token_ids.squeeze(0)  # remove batch dimension
+    flat = token_ids.squeeze(0)
     return tokenizer.decode(flat.tolist())
 
 
@@ -159,9 +161,9 @@ class GroupedQueryAttention(nn.Module):
         self.n_rep      = n_heads // n_kv_heads
         self.head_dim   = d_out // n_heads
 
-        self.W_query = nn.Linear(d_in, d_out, bias=qkv_bias)
-        self.W_key   = nn.Linear(d_in, self.n_kv_heads * self.head_dim, bias=qkv_bias)
-        self.W_value = nn.Linear(d_in, self.n_kv_heads * self.head_dim, bias=qkv_bias)
+        self.W_query  = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_key    = nn.Linear(d_in, self.n_kv_heads * self.head_dim, bias=qkv_bias)
+        self.W_value  = nn.Linear(d_in, self.n_kv_heads * self.head_dim, bias=qkv_bias)
         self.out_proj = nn.Linear(d_out, d_out)
         self.dropout  = nn.Dropout(dropout)
         self.rope     = RoPEEmbedding(d_out, n_heads)
@@ -170,14 +172,12 @@ class GroupedQueryAttention(nn.Module):
         B, T, _ = x.shape
 
         q = self.W_query(x).view(B, T, self.n_heads,    self.head_dim).transpose(1, 2)
-        k = self.W_key(x).view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        k = self.W_key(x).view(B, T,   self.n_kv_heads, self.head_dim).transpose(1, 2)
         v = self.W_value(x).view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
 
-        # Apply RoPE to Q and K
         q = self.rope(q, start_pos=start_pos)
         k = self.rope(k, start_pos=start_pos)
 
-        # KV cache for inference
         if past_kv is not None:
             past_k, past_v = past_kv
             k = torch.cat([past_k, k], dim=-2)
@@ -185,15 +185,13 @@ class GroupedQueryAttention(nn.Module):
 
         new_kv = (k, v)
 
-        # Expand K and V to match Q heads
         k = k.repeat_interleave(self.n_rep, dim=1)
         v = v.repeat_interleave(self.n_rep, dim=1)
 
-        # Flash attention — causal mask handled internally
         out = torch.nn.functional.scaled_dot_product_attention(
             q, k, v,
             dropout_p=self.dropout.p if self.training else 0.0,
-            is_causal=True if T > 1 else False
+            is_causal=True if T > 1 else False,
         )
 
         out = out.transpose(1, 2).contiguous().view(B, T, -1)
@@ -212,9 +210,9 @@ class TransformerBlock(nn.Module):
             dropout=cfg["drop_rate"],
             qkv_bias=cfg["qkv_bias"],
         )
-        self.ff = FeedForward(cfg)
-        self.norm1 = LayerNorm(cfg["emb_dim"])
-        self.norm2 = LayerNorm(cfg["emb_dim"])
+        self.ff           = FeedForward(cfg)
+        self.norm1        = LayerNorm(cfg["emb_dim"])
+        self.norm2        = LayerNorm(cfg["emb_dim"])
         self.drop_shortcut = nn.Dropout(cfg["drop_rate"])
 
     def forward(self, x, past_kv=None, start_pos=0):
@@ -236,19 +234,15 @@ class TransformerBlock(nn.Module):
 class GPTModel(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
-        self.drop_emb = nn.Dropout(cfg["drop_rate"])
-
+        self.tok_emb   = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
+        self.drop_emb  = nn.Dropout(cfg["drop_rate"])
         self.trf_blocks = nn.ModuleList(
             [TransformerBlock(cfg) for _ in range(cfg["n_layers"])]
         )
-
         self.final_norm = LayerNorm(cfg["emb_dim"])
-        self.out_head = self.tok_emb.weight  # weight tying
+        self.out_head   = self.tok_emb.weight  # weight tying
 
-        # GPT-2 style weight initialisation
         self.apply(self._init_weights)
-        # Scale residual projections by 1/sqrt(2*n_layers) to stabilise deep networks
         for block in self.trf_blocks:
             nn.init.normal_(block.att.out_proj.weight, mean=0.0,
                             std=0.02 / math.sqrt(2 * cfg["n_layers"]))
@@ -269,7 +263,6 @@ class GPTModel(nn.Module):
         x = self.drop_emb(tok_embeds)
 
         new_key_values = []
-
         for i, block in enumerate(self.trf_blocks):
             layer_past = past_key_values[i] if past_key_values is not None else None
             x, layer_kv = block(x, past_kv=layer_past, start_pos=start_pos)
@@ -277,7 +270,6 @@ class GPTModel(nn.Module):
 
         x = self.final_norm(x)
         logits = x @ self.tok_emb.weight.T
-
         return logits, new_key_values
 
 
@@ -291,7 +283,8 @@ def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=Non
 
     for _ in range(max_new_tokens):
         with torch.no_grad():
-            logits, past_key_values = model(curr_idx, past_key_values=past_key_values, start_pos=start_pos)
+            logits, past_key_values = model(curr_idx, past_key_values=past_key_values,
+                                            start_pos=start_pos)
 
         logits = logits[:, -1, :]
 
@@ -306,7 +299,7 @@ def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=Non
 
         if temperature > 0.0:
             logits = logits / temperature
-            probs = torch.softmax(logits, dim=-1)
+            probs  = torch.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
         else:
             idx_next = torch.argmax(logits, dim=-1, keepdim=True)
@@ -314,9 +307,9 @@ def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=Non
         if eos_id is not None and (idx_next == eos_id).any():
             break
 
-        idx = torch.cat((idx, idx_next), dim=1)
+        idx       = torch.cat((idx, idx_next), dim=1)
         start_pos += curr_idx.shape[1]
-        curr_idx = idx_next
+        curr_idx  = idx_next
 
     return idx
 
@@ -328,30 +321,39 @@ class ShardDataset(Dataset):
     def __init__(self, shard_paths: list[str], context_length: int):
         super().__init__()
         self.context_length = context_length
-        self.mmaps = []
-        self.shard_lengths = []
+        self.mmaps          = []
+        self.shard_lengths  = []
 
         for p in shard_paths:
             mm = np.memmap(p, dtype=np.uint16, mode='r')
             self.mmaps.append(mm)
             self.shard_lengths.append(len(mm))
 
-        self.cumulative = np.cumsum([0] + self.shard_lengths)
-        total = self.cumulative[-1]
-        print(f"  {len(shard_paths)} shard(s) → {total:,} tokens (memory-mapped)")
+        # Stride by context_length so chunks are non-overlapping.
+        # Stride=1 (old behaviour) caused consecutive batches to share
+        # 1023/1024 tokens — effectively memorising the dataset in a few steps.
+        self.stride = context_length
+        stride_lengths = [l // self.stride for l in self.shard_lengths]
+        self.cumulative = np.cumsum([0] + stride_lengths)
+        total_tokens = sum(self.shard_lengths)
+        total_chunks = self.cumulative[-1]
+        print(f"  {len(shard_paths)} shard(s) → {total_tokens:,} tokens "
+              f"| {total_chunks:,} non-overlapping chunks (stride={self.stride})")
 
     def __len__(self):
-        return int(self.cumulative[-1]) - self.context_length
+        return int(self.cumulative[-1])
 
     def __getitem__(self, idx):
+        # Map chunk index → shard + token offset
         shard_idx = np.searchsorted(self.cumulative[1:], idx, side='right')
-        local_idx = idx - self.cumulative[shard_idx]
+        local_chunk = idx - self.cumulative[shard_idx]
+        local_idx   = local_chunk * self.stride   # token offset within shard
 
         end = local_idx + self.context_length + 1
         if end <= self.shard_lengths[shard_idx]:
             chunk = self.mmaps[shard_idx][local_idx:end]
         else:
-            part1 = self.mmaps[shard_idx][local_idx:]
+            part1    = self.mmaps[shard_idx][local_idx:]
             overflow = end - self.shard_lengths[shard_idx]
             if shard_idx + 1 < len(self.mmaps):
                 part2 = self.mmaps[shard_idx + 1][:overflow]
@@ -360,6 +362,17 @@ class ShardDataset(Dataset):
                 chunk = np.pad(part1, (0, overflow), constant_values=0)
 
         chunk = chunk.astype(np.int64)
+
+        # Skip degenerate chunks where >50% of tokens are the same token.
+        # These cause near-zero loss on a single batch and a destructive
+        # gradient update that can spike and damage weights (seen at step 410).
+        counts = np.bincount(chunk, minlength=50257)
+        if counts.max() > len(chunk) * 0.5:
+            # Return a safe no-op batch: inputs=0, targets=EOS (ignored by CE loss)
+            x = torch.zeros(self.context_length, dtype=torch.long)
+            y = torch.full((self.context_length,), 50256, dtype=torch.long)
+            return x, y
+
         x = torch.tensor(chunk[:-1], dtype=torch.long)
         y = torch.tensor(chunk[1:],  dtype=torch.long)
         return x, y
@@ -379,10 +392,10 @@ def get_shard_paths(shard_dir, start, count):
 # LR schedule
 # ──────────────────────────────────────────────
 def get_lr(step, cfg):
-    warmup = cfg["warmup_steps"]
+    warmup    = cfg["warmup_steps"]
     max_steps = cfg["max_steps"]
-    lr = cfg["lr"]
-    min_lr = lr * cfg["min_lr_ratio"]
+    lr        = cfg["lr"]
+    min_lr    = lr * cfg["min_lr_ratio"]
 
     if step < warmup:
         return lr * (step + 1) / warmup
@@ -397,15 +410,22 @@ def get_lr(step, cfg):
 # ──────────────────────────────────────────────
 @torch.no_grad()
 def evaluate(model, val_loader, cfg):
+    """
+    Evaluate on val set. Uses a raw (non-accelerated) DataLoader so that
+    device placement is fully controlled here — avoids the DDP rank
+    mismatch that caused val_loss=9.9 with the prepared val_loader.
+    """
     model.eval()
+    model_device = next(model.parameters()).device
     losses = []
-    for step, (x, y) in enumerate(val_loader):
-        if step >= cfg["eval_steps"]:
+    for i, (x, y) in enumerate(val_loader):
+        if i >= cfg["eval_steps"]:
             break
-        x = x.to(next(model.parameters()).device)
-        y = y.to(next(model.parameters()).device)
+        x, y = x.to(model_device), y.to(model_device)
         logits, _ = model(x)
-        loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+        loss = nn.functional.cross_entropy(
+            logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=50256
+        )
         losses.append(loss.item())
     model.train()
     avg = sum(losses) / len(losses)
@@ -427,7 +447,7 @@ def sample(model, tokenizer, device, prompt="The model learns"):
 def train(cfg):
     # NOTE: do NOT set gradient_accumulation_steps here — we handle it manually
     accelerator = Accelerator(mixed_precision="fp16")
-    device = accelerator.device
+    device      = accelerator.device
 
     accelerator.print(f"Using {accelerator.num_processes} GPU(s) — device: {device}")
     os.makedirs(cfg["ckpt_dir"], exist_ok=True)
@@ -446,7 +466,7 @@ def train(cfg):
     ], lr=cfg["lr"], betas=cfg["betas"])
 
     # ── Data ──
-    train_paths = get_shard_paths(cfg["shard_dir"], 0, cfg["n_train_shards"])
+    train_paths = get_shard_paths(cfg["shard_dir"], 0,                   cfg["n_train_shards"])
     val_paths   = get_shard_paths(cfg["shard_dir"], cfg["n_train_shards"], cfg["n_val_shards"])
 
     accelerator.print("Train shards:")
@@ -462,17 +482,24 @@ def train(cfg):
         val_ds, batch_size=cfg["batch_size"],
         shuffle=False, num_workers=0, pin_memory=True, drop_last=True,
     )
+    # Raw eval loader — never passed through accelerator.prepare()
+    # Device placement handled manually inside evaluate() via model_device.
+    eval_loader = DataLoader(
+        val_ds, batch_size=cfg["batch_size"],
+        shuffle=False, num_workers=0, pin_memory=False, drop_last=True,
+    )
 
-    # ── Accelerate prepares everything ──
+    # ── Accelerate prepares everything except eval_loader ──
     model, optimizer, train_loader, val_loader = accelerator.prepare(
         model, optimizer, train_loader, val_loader
     )
 
-    tokenizer = tiktoken.get_encoding("gpt2")
-    train_iter = iter(train_loader)
-    step, tokens_seen = 0, 0
-    grad_accum = cfg["grad_accum_steps"]
-    t0 = time.time()
+    tokenizer            = tiktoken.get_encoding("gpt2")
+    train_iter           = iter(train_loader)
+    step, tokens_seen    = 0, 0
+    grad_accum           = cfg["grad_accum_steps"]
+    t0                   = time.time()
+    tokens_this_interval = 0
     model.train()
 
     resume_path = os.path.join(cfg["ckpt_dir"], "latest.pt")
@@ -480,7 +507,7 @@ def train(cfg):
         ckpt = torch.load(resume_path, map_location=device)
         accelerator.unwrap_model(model).load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
-        step = ckpt["step"]
+        step        = ckpt["step"]
         tokens_seen = ckpt.get("tokens_seen", 0)
         accelerator.print(f"Resumed from step {step}")
     else:
@@ -488,7 +515,6 @@ def train(cfg):
 
     # ── Training loop ──
     while step < cfg["max_steps"]:
-        # Update learning rate
         lr = get_lr(step, cfg)
         for group in optimizer.param_groups:
             group["lr"] = lr
@@ -503,27 +529,25 @@ def train(cfg):
                 train_iter = iter(train_loader)
                 x, y = next(train_iter)
 
-            tokens_seen += x.numel() * accelerator.num_processes
-            is_last_micro = (micro_step == grad_accum - 1)
+            toks                  = x.numel() * accelerator.num_processes
+            tokens_seen          += toks
+            tokens_this_interval += toks
+            is_last_micro         = (micro_step == grad_accum - 1)
 
-            # Only sync gradients on the last micro step (saves bandwidth)
-            # On single GPU, no_sync doesn't exist — just use nullcontext
-            if not is_last_micro and hasattr(model, "no_sync"):
-                context = model.no_sync()
-            else:
-                context = nullcontext()
-            with context:
+            # Only sync gradients on the last micro step (saves inter-GPU bandwidth)
+            sync_context = accelerator.no_sync(model) if not is_last_micro else nullcontext()
+            with sync_context:
                 logits, _ = model(x)
                 loss = nn.functional.cross_entropy(
-                    logits.view(-1, logits.size(-1)), y.view(-1)
+                    logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=50256
                 )
-                # Scale loss for gradient accumulation
                 scaled_loss = loss / grad_accum
                 accelerator.backward(scaled_loss)
 
-            accum_loss += loss.detach().item() / grad_accum
+            # Reduce loss across all ranks so logged loss reflects true mean
+            loss_reduced = accelerator.reduce(loss.detach().clone(), reduction="mean")
+            accum_loss  += loss_reduced.item() / grad_accum
 
-        # Clip gradients and step
         accelerator.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
         optimizer.step()
         step += 1
@@ -531,27 +555,39 @@ def train(cfg):
         # ── Logging (main process only) ──
         if accelerator.is_main_process:
             if step % cfg["log_interval"] == 0:
-                elapsed = time.time() - t0
+                elapsed     = time.time() - t0
+                tok_per_sec = tokens_this_interval / elapsed if elapsed > 0 else 0
                 print(
                     f"step {step:>5} | loss {accum_loss:.4f} | "
-                    f"ppl {math.exp(accum_loss):.1f} | lr {lr:.2e} | "
-                    f"tok/s {tokens_seen / elapsed:,.0f}",
+                    f"ppl {math.exp(min(accum_loss, 20)):.1f} | lr {lr:.2e} | "
+                    f"tok/s {tok_per_sec:,.0f} | tokens {tokens_seen/1e9:.3f}B",
                     flush=True,
                 )
+                t0                   = time.time()
+                tokens_this_interval = 0
 
             if step % cfg["eval_interval"] == 0:
                 raw_model = accelerator.unwrap_model(model)
-                val_loss, val_ppl = evaluate(raw_model, val_loader, cfg)
+                val_loss, val_ppl = evaluate(raw_model, eval_loader, cfg)
                 print(f"\n[EVAL @ step {step}] val_loss={val_loss:.4f}  val_ppl={val_ppl:.2f}")
                 print(f"[SAMPLE] {sample(raw_model, tokenizer, device)}\n", flush=True)
+                # Reset timer after eval so eval time doesn't pollute tok/s
+                t0                   = time.time()
+                tokens_this_interval = 0
 
             if step % cfg["save_interval"] == 0:
                 raw_model = accelerator.unwrap_model(model)
-                torch.save({
-                    "step": step,
-                    "model": raw_model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                }, os.path.join(cfg["ckpt_dir"], "latest.pt"))
+                ckpt = {
+                    "step":        step,
+                    "tokens_seen": tokens_seen,
+                    "model":       raw_model.state_dict(),
+                    "optimizer":   optimizer.state_dict(),
+                    "train_cfg":   cfg,
+                    "model_cfg":   GPT_CONFIG_250M,
+                }
+                # Two files, both overwritten every save — no accumulation
+                torch.save(ckpt, os.path.join(cfg["ckpt_dir"], "latest.pt"))
+                torch.save(ckpt, os.path.join(cfg["ckpt_dir"], "checkpoint.pt"))
                 print(f"  → Saved checkpoint at step {step}", flush=True)
 
     accelerator.wait_for_everyone()
