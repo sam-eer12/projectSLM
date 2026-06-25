@@ -1,4 +1,3 @@
-
 """
 ChadGPT — 250M parameter GPT with GQA + RoPE
 Kaggle Script mode — 2 T4 GPU training via HuggingFace Accelerate
