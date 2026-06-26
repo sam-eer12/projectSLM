@@ -1,11 +1,4 @@
-"""
-ChadGPT — 250M parameter GPT with GQA + RoPE
-Kaggle Script mode — 2 T4 GPU training via HuggingFace Accelerate
-"""
 
-# ──────────────────────────────────────────────
-# Imports
-# ──────────────────────────────────────────────
 import os
 import math
 import time
@@ -20,61 +13,53 @@ from accelerate import Accelerator
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 
-# ──────────────────────────────────────────────
-# Model Config
-# ──────────────────────────────────────────────
 GPT_CONFIG_250M = {
-    "vocab_size": 50257,       # Vocabulary size
-    "context_length": 1024,    # Context length (Phase 1 pretraining; extended to 4096 in Phase 2)
-    "emb_dim": 1024,           # Embedding dimension
-    "n_heads": 16,             # Number of attention heads
-    "n_kv_heads": 4,           # Number of KV heads (grouped query attention)
-    "n_layers": 18,            # Number of layers
-    "drop_rate": 0.0,          # Dropout rate
-    "qkv_bias": False,         # Query-Key-Value bias
+    "vocab_size": 50257,
+    "context_length": 1024,
+    "emb_dim": 1024,
+    "n_heads": 16,
+    "n_kv_heads": 4,
+    "n_layers": 18,
+    "drop_rate": 0.0,
+    "qkv_bias": False,
 }
 
 
-# ──────────────────────────────────────────────
-# Training Config
-# ──────────────────────────────────────────────
+
+'''
+ train config according to 5 billion dataset tokens 
+ total steps  = (n_train_shards * no of tokens in 1 shard ) / effective batch size
+ the model is trained on kaggle platform for their GPUs so the folder structure is according to that 
+'''
+
 TRAIN_CONFIG = {
-    # Data
     "shard_dir":       ".",
     "n_train_shards":  40,
     "n_val_shards":    10,
     "context_length":  1024,
 
-    # Optimiser
     "lr":              3e-4,
     "weight_decay":    0.1,
     "betas":           (0.9, 0.95),
     "grad_clip":       1.0,
 
-    # LR schedule — cosine decay with linear warmup
     "warmup_steps":    500,
     "max_steps":       15259,
     "min_lr_ratio":    0.1,
 
-    # Batch
-    "batch_size":      2,               # per-GPU micro batch
-    "grad_accum_steps": 64,              # effective batch = batch_size x grad_accum x num_gpus x ctx
-                                        # = 2 x 8 x 2 x 1024 = 32,768 tokens/step (~16hr total)
+    "batch_size":      2,
+    "grad_accum_steps": 64,
 
-    # Eval & logging
     "eval_interval":   100,
     "eval_steps":      20,
     "log_interval":    10,
 
-    # Checkpointing
     "ckpt_dir":        "/kaggle/working/checkpoints",
     "save_interval":   100,
 }
 
 
-# ──────────────────────────────────────────────
-# Tokenizer helpers
-# ──────────────────────────────────────────────
+
 def text_to_token_ids(text, tokenizer):
     encoded = tokenizer.encode(text, allowed_special={'<|endoftext|>'})
     encoded_tensor = torch.tensor(encoded).unsqueeze(0)
@@ -86,9 +71,7 @@ def token_ids_to_text(token_ids, tokenizer):
     return tokenizer.decode(flat.tolist())
 
 
-# ──────────────────────────────────────────────
-# Model components
-# ──────────────────────────────────────────────
+
 class LayerNorm(nn.Module):
     def __init__(self, emb_dim):
         super().__init__()
@@ -103,6 +86,20 @@ class LayerNorm(nn.Module):
         return self.scale * norm_x + self.shift
 
 
+'''
+if you want you can also use swiglu in here instead of the gelu ,
+to use this in the feed forward network just chnage the entire nn.sequential to     SwiGLU(cfg["emb_dim"])
+
+class SwiGLU(nn.Module):
+    def __init__(self, emb_dim):
+        super().__init__()
+        self.w1 = nn.Linear(emb_dim, 4 * emb_dim, bias=False)
+        self.w2 = nn.Linear(emb_dim, 4 * emb_dim, bias=False)
+        self.w3 = nn.Linear(4 * emb_dim, emb_dim, bias=False)
+
+    def forward(self, x):
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
+'''
 class GELU(nn.Module):
     def __init__(self):
         super().__init__()
@@ -113,6 +110,11 @@ class GELU(nn.Module):
             (x + 0.044715 * torch.pow(x, 3))
         ))
 
+
+''' 
+it helps the model to expand the layers and then look at the minute details so it expands it to 4 times the embedding dimension,
+but input and output dimension should be the same
+'''
 
 class FeedForward(nn.Module):
     def __init__(self, cfg):
@@ -127,8 +129,10 @@ class FeedForward(nn.Module):
         return self.layers(x)
 
 
+''' 
+in this the theta is used to rotate the matrix for the Q and K matrices in 2d dimension to find the relative distance between them 
+'''
 class RoPEEmbedding(nn.Module):
-    """Rotary Position Embedding — applied inside each attention head."""
     def __init__(self, emb_dim, n_heads, base=10000):
         super().__init__()
         self.head_dim = emb_dim // n_heads
@@ -140,7 +144,6 @@ class RoPEEmbedding(nn.Module):
         return torch.stack([-x2, x1], dim=-1).flatten(-2)
 
     def forward(self, x, start_pos=0):
-        # x: (B, n_heads, T, head_dim)
         seq_len = x.shape[-2]
         t = torch.arange(start_pos, start_pos + seq_len, device=x.device).unsqueeze(1)
         freqs = (t * self.theta).unsqueeze(0).unsqueeze(0)
@@ -148,6 +151,18 @@ class RoPEEmbedding(nn.Module):
         sin = torch.sin(freqs).repeat_interleave(2, dim=-1)
         return x * cos + self._rotate(x) * sin
 
+
+''' 
+here is also the implementation of the kv caching where we cache the past token in K and V 
+and use the generate attn score to replace the Q 
+which reduces the computational power and caches the K and V and also only 1 token is generate at a time on the attn output side
+
+in the GQA part 
+group size (n_rep) is n_heads / n_kv_heads 
+this is the group of heads sharing same K and V values to reduce the KV cache while still preserving the output quality 
+if you increase this value by either reducing kv heads or by increaseing attn heads memory usage will decrease but the output quality will decrease and 
+if you decrease this value doing vice versa the memroy usage will increase but the output quality will also increase 
+'''
 
 class GroupedQueryAttention(nn.Module):
     def __init__(self, d_in, d_out, context_length, dropout, n_heads, n_kv_heads, qkv_bias=False):
@@ -239,7 +254,7 @@ class GPTModel(nn.Module):
             [TransformerBlock(cfg) for _ in range(cfg["n_layers"])]
         )
         self.final_norm = LayerNorm(cfg["emb_dim"])
-        self.out_head   = self.tok_emb.weight  # weight tying
+        self.out_head   = self.tok_emb.weight
 
         self.apply(self._init_weights)
         for block in self.trf_blocks:
@@ -272,9 +287,7 @@ class GPTModel(nn.Module):
         return logits, new_key_values
 
 
-# ──────────────────────────────────────────────
-# Generation (inference with KV cache)
-# ──────────────────────────────────────────────
+
 def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=None):
     past_key_values = None
     start_pos = 0
@@ -313,9 +326,7 @@ def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=Non
     return idx
 
 
-# ──────────────────────────────────────────────
-# Dataset & data loading
-# ──────────────────────────────────────────────
+
 class ShardDataset(Dataset):
     def __init__(self, shard_paths: list[str], context_length: int):
         super().__init__()
@@ -328,9 +339,7 @@ class ShardDataset(Dataset):
             self.mmaps.append(mm)
             self.shard_lengths.append(len(mm))
 
-        # Stride by context_length so chunks are non-overlapping.
-        # Stride=1 (old behaviour) caused consecutive batches to share
-        # 1023/1024 tokens — effectively memorising the dataset in a few steps.
+
         self.stride = context_length
         stride_lengths = [l // self.stride for l in self.shard_lengths]
         self.cumulative = np.cumsum([0] + stride_lengths)
@@ -343,7 +352,7 @@ class ShardDataset(Dataset):
         return int(self.cumulative[-1])
 
     def __getitem__(self, idx):
-        # Map chunk index → shard + token offset
+
         shard_idx = np.searchsorted(self.cumulative[1:], idx, side='right')
         local_chunk = idx - self.cumulative[shard_idx]
         local_idx   = local_chunk * self.stride   # token offset within shard
@@ -362,12 +371,10 @@ class ShardDataset(Dataset):
 
         chunk = chunk.astype(np.int64)
 
-        # Skip degenerate chunks where >50% of tokens are the same token.
-        # These cause near-zero loss on a single batch and a destructive
-        # gradient update that can spike and damage weights (seen at step 410).
+
         counts = np.bincount(chunk, minlength=50257)
         if counts.max() > len(chunk) * 0.5:
-            # Return a safe no-op batch: inputs=0, targets=EOS (ignored by CE loss)
+
             x = torch.zeros(self.context_length, dtype=torch.long)
             y = torch.full((self.context_length,), 50256, dtype=torch.long)
             return x, y
@@ -387,9 +394,7 @@ def get_shard_paths(shard_dir, start, count):
     return paths
 
 
-# ──────────────────────────────────────────────
-# LR schedule
-# ──────────────────────────────────────────────
+
 def get_lr(step, cfg):
     warmup    = cfg["warmup_steps"]
     max_steps = cfg["max_steps"]
@@ -404,16 +409,10 @@ def get_lr(step, cfg):
     return min_lr + 0.5 * (lr - min_lr) * (1 + math.cos(math.pi * progress))
 
 
-# ──────────────────────────────────────────────
-# Evaluation & sampling helpers
-# ──────────────────────────────────────────────
+
 @torch.no_grad()
 def evaluate(model, val_loader, cfg):
-    """
-    Evaluate on val set. Uses a raw (non-accelerated) DataLoader so that
-    device placement is fully controlled here — avoids the DDP rank
-    mismatch that caused val_loss=9.9 with the prepared val_loader.
-    """
+
     model.eval()
     model_device = next(model.parameters()).device
     losses = []
@@ -440,23 +439,21 @@ def sample(model, tokenizer, device, prompt="The model learns"):
     return token_ids_to_text(out, tokenizer)
 
 
-# ──────────────────────────────────────────────
-# Training loop (Accelerate handles multi-GPU)
-# ──────────────────────────────────────────────
+
 def train(cfg):
-    # NOTE: do NOT set gradient_accumulation_steps here — we handle it manually
+
     accelerator = Accelerator(mixed_precision="fp16")
     device      = accelerator.device
 
     accelerator.print(f"Using {accelerator.num_processes} GPU(s) — device: {device}")
     os.makedirs(cfg["ckpt_dir"], exist_ok=True)
 
-    # ── Model ──
+
     model = GPTModel(GPT_CONFIG_250M)
     total_params = sum(p.numel() for p in model.parameters())
     accelerator.print(f"Total parameters: {total_params:,}")
 
-    # ── Optimiser (weight decay only on 2D+ params) ──
+
     decay_params    = [p for n, p in model.named_parameters() if p.dim() >= 2]
     no_decay_params = [p for n, p in model.named_parameters() if p.dim() < 2]
     optimizer = torch.optim.AdamW([
@@ -464,7 +461,7 @@ def train(cfg):
         {"params": no_decay_params, "weight_decay": 0.0},
     ], lr=cfg["lr"], betas=cfg["betas"])
 
-    # ── Data ──
+
     train_paths = get_shard_paths(cfg["shard_dir"], 0,                   cfg["n_train_shards"])
     val_paths   = get_shard_paths(cfg["shard_dir"], cfg["n_train_shards"], cfg["n_val_shards"])
 
@@ -481,14 +478,13 @@ def train(cfg):
         val_ds, batch_size=cfg["batch_size"],
         shuffle=False, num_workers=0, pin_memory=True, drop_last=True,
     )
-    # Raw eval loader — never passed through accelerator.prepare()
-    # Device placement handled manually inside evaluate() via model_device.
+
     eval_loader = DataLoader(
         val_ds, batch_size=cfg["batch_size"],
         shuffle=False, num_workers=0, pin_memory=False, drop_last=True,
     )
 
-    # ── Accelerate prepares everything except eval_loader ──
+
     model, optimizer, train_loader, val_loader = accelerator.prepare(
         model, optimizer, train_loader, val_loader
     )
@@ -512,7 +508,7 @@ def train(cfg):
     else:
         accelerator.print("Starting fresh run")
 
-    # ── Training loop ──
+
     while step < cfg["max_steps"]:
         lr = get_lr(step, cfg)
         for group in optimizer.param_groups:
@@ -533,7 +529,7 @@ def train(cfg):
             tokens_this_interval += toks
             is_last_micro         = (micro_step == grad_accum - 1)
 
-            # Only sync gradients on the last micro step (saves inter-GPU bandwidth)
+
             sync_context = accelerator.no_sync(model) if not is_last_micro else nullcontext()
             with sync_context:
                 logits, _ = model(x)
@@ -543,7 +539,7 @@ def train(cfg):
                 scaled_loss = loss / grad_accum
                 accelerator.backward(scaled_loss)
 
-            # Reduce loss across all ranks so logged loss reflects true mean
+
             loss_reduced = accelerator.reduce(loss.detach().clone(), reduction="mean")
             accum_loss  += loss_reduced.item() / grad_accum
 
@@ -551,7 +547,7 @@ def train(cfg):
         optimizer.step()
         step += 1
 
-        # ── Logging (main process only) ──
+
         if accelerator.is_main_process:
             if step % cfg["log_interval"] == 0:
                 elapsed     = time.time() - t0
@@ -570,7 +566,7 @@ def train(cfg):
                 val_loss, val_ppl = evaluate(raw_model, eval_loader, cfg)
                 print(f"\n[EVAL @ step {step}] val_loss={val_loss:.4f}  val_ppl={val_ppl:.2f}")
                 print(f"[SAMPLE] {sample(raw_model, tokenizer, device)}\n", flush=True)
-                # Reset timer after eval so eval time doesn't pollute tok/s
+
                 t0                   = time.time()
                 tokens_this_interval = 0
 
@@ -584,7 +580,7 @@ def train(cfg):
                     "train_cfg":   cfg,
                     "model_cfg":   GPT_CONFIG_250M,
                 }
-                # Two files, both overwritten every save — no accumulation
+
                 torch.save(ckpt, os.path.join(cfg["ckpt_dir"], "latest.pt"))
                 torch.save(ckpt, os.path.join(cfg["ckpt_dir"], "checkpoint.pt"))
                 print(f"  → Saved checkpoint at step {step}", flush=True)
@@ -593,8 +589,6 @@ def train(cfg):
     accelerator.print("Done.")
 
 
-# ──────────────────────────────────────────────
-# Entry point
-# ──────────────────────────────────────────────
+
 if __name__ == "__main__":
     train(TRAIN_CONFIG)
