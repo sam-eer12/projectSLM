@@ -162,6 +162,5 @@ Checkpoints are stored in the **`models/`** directory (not uploaded to Git due t
 4.  **Running ChadGPT Pre-training:**
     Ensure you configure your accelerate device details:
     ```bash
-    accelerate config
-    accelerate launch chadgpt.py
+    !accelerate launch --multi_gpu --num_processes=2 --mixed_precision=fp16 /kaggle/working/chadgpt.py
     ```
