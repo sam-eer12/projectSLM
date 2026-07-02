@@ -62,13 +62,13 @@ Located in the **[SLM - learning/](SLM%20-%20learning)** directory, this series 
 
 **[chadgpt.py](chadgpt.py)** (and its notebook counterpart **[chadgpt.ipynb](chadgpt.ipynb)**) represents the flagship architecture in this repo—a high-performance, custom GPT model designed to scale.
 
-### 🚀 Key Architectural Features
+### Key Architectural Features
 *   **Grouped Query Attention (GQA):** Implements query grouping (shared Key/Value heads) to drastically reduce KV cache memory footprints while preserving generation quality.
 *   **Rotary Positional Embeddings (RoPE):** Applies relative positional information by rotating Query and Key representations, allowing better sequence length extrapolation.
 *   **KV Caching:** Caches historical token keys and values during generation to accelerate inference (speeds up autoregressive generation from $O(T^2)$ to $O(T)$).
 *   **Weight Tying:** Shares weights between token embeddings and the pre-softmax linear output head.
 
-### ⚡ Training & Scaling Config
+### Training & Scaling Config
 *   **Multi-GPU Training:** Powered by Hugging Face's **`Accelerate`** to perform 16-bit mixed-precision (FP16) training across multiple GPUs.
 *   **Efficient Dataset Sharding:** Uses **[ShardDataset](chadgpt.py#L330)**, a custom `numpy.memmap` dataset that streams pre-tokenized tokens across 50 memory-mapped shards (40 train, 10 val) representing over **5 billion tokens** of the `smollm-corpus` (specifically `cosmopedia-v2`).
 *   **Cosine Decaying Learning Rate:** Incorporates a linear warmup (500 steps) followed by a cosine learning rate decay down to $10\%$.
