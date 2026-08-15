@@ -288,7 +288,7 @@ class GPTModel(nn.Module):
 
 
 
-def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=None):
+def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, top_p=None, repetition_penalty=1.0, eos_id=None):
     past_key_values = None
     start_pos = 0
     curr_idx = idx
@@ -300,6 +300,13 @@ def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=Non
 
         logits = logits[:, -1, :]
 
+        if repetition_penalty != 1.0:
+            for token_id in set(idx[0].tolist()):
+                if logits[0, token_id] > 0:
+                    logits[0, token_id] /= repetition_penalty
+                else:
+                    logits[0, token_id] *= repetition_penalty
+
         if top_k is not None:
             top_logits, _ = torch.topk(logits, top_k)
             min_val = top_logits[:, -1:]
@@ -308,6 +315,15 @@ def generate(model, idx, max_new_tokens, temperature=0.0, top_k=None, eos_id=Non
                 torch.tensor(float("-inf"), device=logits.device),
                 logits,
             )
+
+        if top_p is not None and top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 0] = 0
+            indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+            logits[indices_to_remove] = float("-inf")
 
         if temperature > 0.0:
             logits = logits / temperature
