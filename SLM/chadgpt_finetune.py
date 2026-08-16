@@ -61,8 +61,8 @@ def apply_position_interpolation(scale):
         seq_len = x.shape[-2]
         t = torch.arange(start_pos, start_pos + seq_len, device=x.device).unsqueeze(1) * scale
         freqs = (t * self.theta).unsqueeze(0).unsqueeze(0)
-        cos = torch.cos(freqs).repeat_interleave(2, dim=-1)
-        sin = torch.sin(freqs).repeat_interleave(2, dim=-1)
+        cos = torch.cos(freqs).repeat_interleave(2, dim=-1).to(dtype=x.dtype)
+        sin = torch.sin(freqs).repeat_interleave(2, dim=-1).to(dtype=x.dtype)
         return x * cos + self._rotate(x) * sin
 
     RoPEEmbedding.forward = _rope_forward_pi
