@@ -79,7 +79,9 @@ ChadGPT was trained end-to-end on Kaggle (2× NVIDIA T4 GPUs) using Hugging Face
 
 ### Interactive Inference & Chat
 
-The final instruction-tuned model is available on **[Hugging Face: sam-eer12/chadGPT](https://huggingface.co/sam-eer12/chadGPT)** with FP32 Safetensors weights, a model card, tokenizer data, and standalone inference code:
+The final instruction-tuned model is available on **[Hugging Face: sam-eer12/chadGPT](https://huggingface.co/sam-eer12/chadGPT)** with FP32 Safetensors weights, a model card, tokenizer data, and standalone inference code.
+
+**ARC-Easy:** the final checkpoint scores **42.55% accuracy** and **41.37% length-normalized accuracy** on the full 2,376-question test split, zero-shot, using LM Evaluation Harness 0.4.13. See the [evaluation report](evaluations/arc_easy/README.md) for settings, per-question scores, and reproduction instructions.
 
 ```bash
 hf download sam-eer12/chadGPT --local-dir chadGPT

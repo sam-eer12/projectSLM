@@ -1,0 +1,169 @@
+{
+  "results": {
+    "arc_easy": {
+      "name": "arc_easy",
+      "alias": "arc_easy",
+      "sample_len": 2376,
+      "acc,none": 0.4255050505050505,
+      "acc_stderr,none": 0.01014527118259111,
+      "acc_norm,none": 0.4137205387205387,
+      "acc_norm_stderr,none": 0.010105878530238066
+    }
+  },
+  "group_subtasks": {},
+  "configs": {
+    "arc_easy": {
+      "task": "arc_easy",
+      "tag": [
+        "ai2_arc"
+      ],
+      "dataset_path": "allenai/ai2_arc",
+      "dataset_name": "ARC-Easy",
+      "dataset_kwargs": {
+        "revision": "210d026faf9955653af8916fad021475a3f00453"
+      },
+      "training_split": "train",
+      "validation_split": "validation",
+      "test_split": "test",
+      "doc_to_text": "Question: {{question}}\nAnswer:",
+      "doc_to_target": "{{choices.label.index(answerKey)}}",
+      "unsafe_code": false,
+      "doc_to_choice": "{{choices.text}}",
+      "description": "",
+      "target_delimiter": " ",
+      "fewshot_delimiter": "\n\n",
+      "fewshot_config": {
+        "sampler": "default",
+        "split": null,
+        "process_docs": null,
+        "fewshot_indices": null,
+        "samples": null,
+        "doc_to_text": "Question: {{question}}\nAnswer:",
+        "doc_to_choice": "{{choices.text}}",
+        "doc_to_target": "{{choices.label.index(answerKey)}}",
+        "gen_prefix": null,
+        "fewshot_delimiter": "\n\n",
+        "target_delimiter": " "
+      },
+      "num_fewshot": 0,
+      "metric_list": [
+        {
+          "metric": "acc",
+          "aggregation": "mean",
+          "higher_is_better": true
+        },
+        {
+          "metric": "acc_norm",
+          "aggregation": "mean",
+          "higher_is_better": true
+        }
+      ],
+      "output_type": "multiple_choice",
+      "repeats": 1,
+      "should_decontaminate": true,
+      "doc_to_decontamination_query": "Question: {{question}}\nAnswer:",
+      "metadata": {
+        "version": 1.0
+      }
+    }
+  },
+  "versions": {
+    "arc_easy": 1.0
+  },
+  "n-shot": {
+    "arc_easy": 0
+  },
+  "higher_is_better": {
+    "arc_easy": {
+      "acc": true,
+      "acc_norm": true
+    }
+  },
+  "n-samples": {
+    "arc_easy": {
+      "original": 2376,
+      "effective": 2376
+    }
+  },
+  "config": {
+    "model": "ChadGPTLM",
+    "model_args": null,
+    "batch_size": null,
+    "batch_sizes": [],
+    "device": "mps:0",
+    "use_cache": null,
+    "limit": null,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": null,
+    "random_seed": 0,
+    "numpy_seed": 1234,
+    "torch_seed": 1234,
+    "fewshot_seed": 1234
+  },
+  "git_hash": "cd3a879",
+  "date": 1791088148.0004008,
+  "pretty_env_info": "PyTorch version: 2.10.0\nIs debug build: False\nCUDA used to build PyTorch: None\nROCM used to build PyTorch: N/A\n\nOS: macOS 27.0.1 (arm64)\nGCC version: Could not collect\nClang version: 21.0.0 (clang-2100.3.34.2)\nCMake version: Could not collect\nLibc version: N/A\n\nPython version: 3.14.0 (v3.14.0:ebf955df7a8, Oct  7 2025, 08:20:14) [Clang 16.0.0 (clang-1600.0.26.6)] (64-bit runtime)\nPython platform: macOS-27.0.1-arm64-arm-64bit-Mach-O\nIs CUDA available: False\nCUDA runtime version: No CUDA\nCUDA_MODULE_LOADING set to: N/A\nGPU models and configuration: No CUDA\nNvidia driver version: No CUDA\ncuDNN version: No CUDA\nIs XPU available: False\nHIP runtime version: N/A\nMIOpen runtime version: N/A\nIs XNNPACK available: True\nCaching allocator config: N/A\n\nCPU:\nApple M4\n\nVersions of relevant libraries:\n[pip3] numpy==2.4.2\n[pip3] torch==2.10.0\n[pip3] torch-geometric==2.7.0\n[pip3] torchaudio==2.10.0\n[pip3] torchmetrics==1.8.2\n[pip3] torchvision==0.25.0\n[conda] Could not collect",
+  "transformers_version": "N/A",
+  "lm_eval_version": "0.4.13",
+  "upper_git_hash": null,
+  "provenance": {
+    "started_at_utc": "2026-10-04T04:29:03.433291+00:00",
+    "completed_at_utc": "2026-10-04T04:32:31.850806+00:00",
+    "elapsed_seconds": 208.41798358398955,
+    "model": "sam-eer12/chadGPT",
+    "phase": "sft",
+    "sft_step": 350,
+    "weight_dtype": "float32",
+    "weight_sha256": "7698b28fa59aed37e2e9d7a1e21d45542b2f8ff53f56de1d60eef2a9d8923ddd",
+    "source_checkpoint_sha256": "c2383bcb9af51115623d41fbb48f1f09b1a65dc04f3eef1b5fca4381f032f284",
+    "model_files_sha256": {
+      "config.json": "ebdd3c6a4c43c6853ef35d0b8281ccb85ef9eda72c79fa06d9d1f285dc3112ca",
+      "tokenizer_config.json": "f943282d3425e875bfbfecaf357fe858bf146f343abc0e3beff465bb77df6f5c",
+      "tokenizer.tiktoken": "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930"
+    },
+    "inference_files_sha256": {
+      "inference.py": "89f1ed552a3e9408c7f927968a737d81bcc793f77affcf218e0a2ea50b2aaff2",
+      "modeling_chadgpt.py": "9f12cd98fdec956680c3e4ba81f9694909f01e10c4012405482ebfb0e8b801b8"
+    },
+    "dataset": "allenai/ai2_arc",
+    "subset": "ARC-Easy",
+    "split": "test",
+    "dataset_revision": "210d026faf9955653af8916fad021475a3f00453",
+    "test_docs_sha256": "09ab01ecb7493f88ebe45f4183360b102937d3879f566216e62f4ddeececdf56",
+    "task_yaml_sha256": "96da1d9efe1df88659481cedc13985cb347dc068554a2eae561303fa39bfab3f",
+    "num_fewshot": 0,
+    "apply_chat_template": false,
+    "add_bos_token": false,
+    "prompt": "Question: {question}\nAnswer:",
+    "continuation": " {answer_text}",
+    "acc_norm_definition": "Answer log-likelihood divided by answer text character count",
+    "samples_evaluated": 2376,
+    "full_test_split": true,
+    "correct_acc": 1011,
+    "correct_acc_norm": 983,
+    "uniform_random_expected_accuracy": 0.25016133557800224,
+    "device": "mps:0",
+    "cpu_threads": 4,
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "python": "3.14.0",
+    "packages": {
+      "lm_eval": "0.4.13",
+      "datasets": "5.0.1",
+      "torch": "2.10.0",
+      "tiktoken": "0.12.0",
+      "safetensors": "0.8.0",
+      "numpy": "2.4.2"
+    },
+    "script_sha256": "d903f85b3f562582ef88fe1ea6c0561d8cdafccc6b2d1a542f158bea1155668f",
+    "source_git_commit": "cd3a8797256666d27a931531e690e3d96c522aa1",
+    "cached_scoring_validation": {
+      "questions_checked": 8,
+      "max_absolute_loglikelihood_error": 3.4332275390625e-05,
+      "reference": "Uncached full-sequence FP32 forward pass for every answer",
+      "answer_rankings_match": true
+    },
+    "max_input_tokens": 159,
+    "truncated_inputs": 0,
+    "decontamination": "Not performed; training data overlap with ARC was not audited"
+  }
+}

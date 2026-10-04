@@ -185,7 +185,24 @@ Token counts are training-loop counters, including repeated examples and SFT tok
 
 ## Evaluation and limitations
 
-No standardized benchmark results are available for this release. The checkpoint contains no saved validation loss or perplexity, so this card does not report those metrics. Export verification checks weight equality, tokenizer compatibility, finite inference logits, and cached decoding against the original SFT implementation; those checks are not an evaluation of answer quality.
+### ARC-Easy
+
+The final 350-step SFT checkpoint was evaluated on **all 2,376 ARC-Easy test questions**, **zero-shot**, using [EleutherAI's LM Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) **0.4.13** and a custom adapter for ChadGPT's PyTorch architecture. Evaluation date: **October 4, 2026**.
+
+| Benchmark | Shots | Metric | Score | Correct / total |
+|---|---|---|---|---|
+| ARC-Easy (test) | 0 | Accuracy (`acc`) | **42.55% ± 1.01 pp** | 1,011 / 2,376 |
+| ARC-Easy (test) | 0 | Length-normalized accuracy (`acc_norm`) | **41.37% ± 1.01 pp** | 983 / 2,376 |
+
+Uncertainty values are one standard error in percentage points. The run used the original **FP32 weights** on Apple MPS, the harness's standard `Question: {question}\nAnswer:` prompt, and answer-text conditional log-likelihoods, with **no chat template and no added BOS token**. `acc` selects the answer with the highest summed token log-likelihood; `acc_norm` divides that score by the answer text's character count before selecting. Every test question was scored, with no input truncation.
+
+The dataset is [allenai/ai2_arc](https://huggingface.co/datasets/allenai/ai2_arc), configuration `ARC-Easy`, pinned to revision `210d026faf9955653af8916fad021475a3f00453`. See [`evaluation/arc_easy/`](evaluation/arc_easy/) for the full results, per-question answer scores, weight and dataset hashes, exact settings, and reproduction instructions. The included [`evaluate_arc_easy.py`](evaluate_arc_easy.py) runs directly from a downloaded model folder after installing `requirements-eval.txt`; its source is maintained in the project's `SLM/evaluate_arc_easy.py`.
+
+These results measure multiple-choice science-question answer likelihoods. Conversational generation and instruction-following quality were not measured by this benchmark. Training-data overlap with ARC has not been audited, and no decontamination was performed.
+
+### Other limitations
+
+The checkpoint contains no saved validation loss or perplexity, so this card does not report those metrics. Export verification checks weight equality, tokenizer compatibility, finite inference logits, and cached decoding against the original SFT implementation; those checks are not an evaluation of answer quality.
 
 ChadGPT is an educational and research model for exploring small language models, local text generation, and instruction tuning. It can produce incorrect facts, weak reasoning, repetitive text, invalid code, or biased and offensive content. English is the primary language; multilingual capability is not evaluated. The 4,096-token configuration is not evidence of reliable long-context retrieval. Review generated text and test generated code before use. This release is not validated for high-stakes decisions.
 
@@ -196,6 +213,8 @@ ChadGPT is an educational and research model for exploring small language models
 - `tokenizer.tiktoken`, `tokenizer_config.json`: complete tokenizer data.
 - `modeling_chadgpt.py`, `inference.py`, `requirements.txt`: standalone PyTorch loading and chat code.
 - `training_info.json`, `training/`: checkpoint metadata, provenance, and source training scripts.
+- `evaluation/arc_easy/`: full zero-shot ARC-Easy results, per-question scores, and reproduction instructions.
+- `evaluate_arc_easy.py`, `requirements-eval.txt`: standalone benchmark runner and evaluation dependencies.
 - `chadgpt.ipynb`: the original Kaggle training and local inference notebook.
 - `chadgpt_playground.ipynb`: a launcher notebook for temporary public Gradio demos.
 - `notebook.ipynb`: the same launcher under the filename required for direct Colab and Kaggle opening.

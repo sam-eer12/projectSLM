@@ -66,6 +66,12 @@ def main():
     package = PROJECT_ROOT / "SLM/huggingface"
     for name in ["README.md", "LICENSE", "modeling_chadgpt.py", "inference.py", "requirements.txt"]:
         shutil.copy2(package / name, out / name)
+    shutil.copy2(PROJECT_ROOT / "SLM/evaluate_arc_easy.py", out / "evaluate_arc_easy.py")
+    # The exported evaluator sits beside the standalone inference dependencies.
+    eval_requirements = (PROJECT_ROOT / "SLM/requirements-eval.txt").read_text()
+    (out / "requirements-eval.txt").write_text(
+        eval_requirements.replace("-r huggingface/requirements.txt", "-r requirements.txt")
+    )
     shutil.copy2(PROJECT_ROOT / "SLM/chadgpt.ipynb", out / "chadgpt.ipynb")
     shutil.copy2(PROJECT_ROOT / "SLM/chadgpt_playground.ipynb", out / "chadgpt_playground.ipynb")
     # The Hub uses this exact filename for its Colab and Kaggle launch routes.
@@ -122,6 +128,15 @@ def main():
         "precision_conversion": False,
     }
     write_json(out / "training_info.json", info)
+    evaluation = PROJECT_ROOT / "evaluations/arc_easy"
+    if (evaluation / "results.json").exists():
+        result = json.loads((evaluation / "results.json").read_text())
+        provenance = result["provenance"]
+        if provenance["weight_sha256"] != info["export"]["weight_sha256"]:
+            raise ValueError("ARC-Easy results belong to different weights; do not publish them with this export.")
+        if not provenance["full_test_split"]:
+            raise ValueError("The model card requires a full ARC-Easy test-split evaluation.")
+        shutil.copytree(evaluation, out / "evaluation/arc_easy", dirs_exist_ok=True)
     print(f"Exported {parameter_count:,} parameters to {out}")
     print(f"Weights: {info['export']['weight_bytes']:,} bytes (float32, no precision conversion)")
 

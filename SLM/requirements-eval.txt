@@ -1,0 +1,4 @@
+# Evaluation only; separate from the inference dependencies.
+lm_eval==0.4.13
+datasets==5.0.1
+-r huggingface/requirements.txt
