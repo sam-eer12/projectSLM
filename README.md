@@ -79,6 +79,28 @@ ChadGPT was trained end-to-end on Kaggle (2× NVIDIA T4 GPUs) using Hugging Face
 
 ### Interactive Inference & Chat
 
+The final instruction-tuned model is available on **[Hugging Face: sam-eer12/chadGPT](https://huggingface.co/sam-eer12/chadGPT)** with FP32 Safetensors weights, a model card, tokenizer data, and standalone inference code:
+
+```bash
+hf download sam-eer12/chadGPT --local-dir chadGPT
+python -m pip install -r chadGPT/requirements.txt
+python chadGPT/inference.py --prompt "Explain grouped-query attention in simple terms."
+```
+
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://huggingface.co/sam-eer12/chadGPT/colab)
+[![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://huggingface.co/sam-eer12/chadGPT/kaggle)
+
+Open either link and run **Install dependencies → Download and load → Test inference**. The **[`SLM/chadgpt_playground.ipynb`](SLM/chadgpt_playground.ipynb)** launcher automatically downloads all inference files and model weights from Hugging Face. On Kaggle, enable Internet and optionally select a GPU; CUDA is used automatically when available. The optional Gradio cell launches with `share=True` in a runtime that permits web demos. Keep that runtime active while sharing the generated `gradio.live` link. Setup details are in **[`SLM/huggingface_space/README.md`](SLM/huggingface_space/README.md)**.
+
+To rebuild and verify the Hub package from the local final checkpoint:
+
+```bash
+.venv/bin/python SLM/export_huggingface.py
+.venv/bin/python SLM/verify_huggingface.py
+hf upload sam-eer12/chadGPT models/huggingface-chadgpt . \
+  --exclude '**/__pycache__/**' --exclude '*.pyc' --exclude '.cache/**'
+```
+
 The complete interactive workflow is available in **[`SLM/chadgpt.ipynb`](SLM/chadgpt.ipynb)**.
 
 The notebook loads the final checkpoint (`models/sft_latest.pt`) and provides a `chat()` helper function that automatically formats prompts with ChatML tags:
