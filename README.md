@@ -92,7 +92,7 @@ python chadGPT/inference.py --prompt "Explain grouped-query attention in simple 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://huggingface.co/sam-eer12/chadGPT/colab)
 [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://huggingface.co/sam-eer12/chadGPT/kaggle)
 
-Open either link and run **Install dependencies → Download and load → Test inference**. The **[`SLM/chadgpt_playground.ipynb`](SLM/chadgpt_playground.ipynb)** launcher automatically downloads all inference files and model weights from Hugging Face. On Kaggle, enable Internet and optionally select a GPU; CUDA is used automatically when available. The optional Gradio cell launches with `share=True` in a runtime that permits web demos. Keep that runtime active while sharing the generated `gradio.live` link. Setup details are in **[`SLM/huggingface_space/README.md`](SLM/huggingface_space/README.md)**.
+Open either link and run **Install dependencies → Download and load → Test inference**. The **[`SLM/chadgpt_playground.ipynb`](SLM/chadgpt_playground.ipynb)** launcher automatically downloads all inference files and model weights from Hugging Face and prints responses directly in the notebook. Change the prompt and rerun the test cell to ask another question. On Kaggle, enable Internet and optionally select a GPU; CUDA is used automatically when available. Setup details are in **[`SLM/huggingface_space/README.md`](SLM/huggingface_space/README.md)**.
 
 To rebuild and verify the Hub package from the local final checkpoint:
 

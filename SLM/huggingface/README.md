@@ -26,20 +26,20 @@ ChadGPT is a **249,832,448-parameter decoder-only language model** built and tra
 
 The model uses a custom PyTorch implementation. Run it with the included `inference.py` and `modeling_chadgpt.py`, or use a Hugging Face Gradio Space as described below. This release does not implement the Transformers `AutoModelForCausalLM` interface.
 
-## Test in your browser on Hugging Face
+## Test in your browser
 
-### Temporary public playground with a notebook
+### Inference in a Colab or Kaggle notebook
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://huggingface.co/sam-eer12/chadGPT/colab)
 [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://huggingface.co/sam-eer12/chadGPT/kaggle)
 
-Click either button, sign in to that platform, and run **Install dependencies → Download and load → Test inference**. The notebook automatically fetches the Gradio app, inference code, tokenizer, configuration, and approximately 1 GB of model weights from this public repository. No cloning, manual file uploads, Hugging Face PRO subscription, or model-download token is needed.
+Click either button, sign in to that platform, and run **Install dependencies → Download and load → Test inference**. The notebook automatically fetches the standalone inference code, tokenizer, configuration, and approximately 1 GB of model weights from this public repository. No cloning, manual file uploads, Hugging Face PRO subscription, or model-download token is needed.
 
-The optional **Launch and share** cell uses the same Gradio app and calls `demo.launch(share=True)` to generate a public `https://…gradio.live` link. You can also [download the notebook](https://huggingface.co/sam-eer12/chadGPT/resolve/main/chadgpt_playground.ipynb?download=true). The root [`notebook.ipynb`](notebook.ipynb) is an identical copy used by [Hugging Face's Colab and Kaggle launch integration](https://huggingface.co/docs/hub/notebooks).
+Responses print directly in the notebook. Change the prompt and rerun the test cell to ask another question. You can also [download the notebook](https://huggingface.co/sam-eer12/chadGPT/resolve/main/chadgpt_playground.ipynb?download=true). The root [`notebook.ipynb`](notebook.ipynb) is an identical copy used by [Hugging Face's Colab and Kaggle launch integration](https://huggingface.co/docs/hub/notebooks).
 
-On Kaggle, enable **Internet** in the notebook settings and optionally select a GPU accelerator. CUDA is used when available; CPU also works. Keep the last cell running and share the public URL it prints. The link lasts only while the notebook runtime is active, with a maximum share-link lifetime of one week. See the [notebook setup guide](https://huggingface.co/sam-eer12/chadGPT/blob/main/playground/README.md) and [Gradio's sharing documentation](https://gradio.app/guides/sharing-your-app).
+On Kaggle, enable **Internet** in the notebook settings and optionally select a GPU accelerator. CUDA is used when available; CPU also works. See the [notebook setup guide](https://huggingface.co/sam-eer12/chadGPT/blob/main/playground/README.md).
 
-For Colab, the **Test inference** cell runs directly in the notebook. Colab's free managed runtimes restrict using a web UI as the primary interface and may terminate a shared Gradio demo; use the optional sharing cell only in a runtime whose rules permit it. See the [Colab FAQ](https://research.google.com/colaboratory/faq.html). This route hosts generation in your notebook runtime; the Hugging Face model page provides the weights and launcher files.
+On Colab, connect a runtime and optionally select a GPU before running the cells. Generation runs in your notebook runtime; the Hugging Face model page provides the weights and launcher files.
 
 ### Persistent playground using a Hugging Face Space
 
@@ -216,7 +216,7 @@ ChadGPT is an educational and research model for exploring small language models
 - `evaluation/arc_easy/`: full zero-shot ARC-Easy results, per-question scores, and reproduction instructions.
 - `evaluate_arc_easy.py`, `requirements-eval.txt`: standalone benchmark runner and evaluation dependencies.
 - `chadgpt.ipynb`: the original Kaggle training and local inference notebook.
-- `chadgpt_playground.ipynb`: a launcher notebook for temporary public Gradio demos.
+- `chadgpt_playground.ipynb`: a launcher notebook for direct inference in Colab or Kaggle.
 - `notebook.ipynb`: the same launcher under the filename required for direct Colab and Kaggle opening.
 - `playground/`: ready-to-upload Gradio Space files and website setup instructions.
 - `LICENSE`: MIT license, matching the license selected for this model repository.
